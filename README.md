@@ -13,12 +13,12 @@ March 2025
 
 
 
-## DeepRL Curriculum (algo ordering):
+## DeepRL Curriculum (algo ordering from spinning up OAI blog):
 - vanilla policy gradient:
-    - REINFORCE
-    - DQN
-    - A2C
-    - PPO (the variant with the clipped objective)
-    - DDPG
+    - [x] REINFORCE
+    - [ ] DQN
+    - [ ] A2C
+    - [ ] PPO (the variant with the clipped objective)
+    - [ ] DDPG
 
 
