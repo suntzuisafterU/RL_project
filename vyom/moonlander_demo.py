@@ -47,7 +47,7 @@ class PolicyNetwork(nn.Module):
     def sample_action(self, state: torch.Tensor) -> tuple[float, torch.Tensor]:
         """Sample an action from the policy"""
         probs = self.forward(state)
-        dist = torch.distributions.Categorical(probs)
+        dist = Categorical(probs)
         action = dist.sample()
         log_prob = dist.log_prob(action)
         action = action.item()
