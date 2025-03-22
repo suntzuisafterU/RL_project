@@ -26,22 +26,19 @@ env = gym.make("LunarLander-v3")
 
 
 class PolicyNetwork(nn.Module):
-    def __init__(self, obs_space_dims: int, action_space_dims: int):
+    def __init__(self, obs_space_dims: int, action_space_dims: int, n_layers: int = 2):
         super().__init__()
+        self.l1 = nn.Linear(obs_space_dims, 64)
+        self.layers = self.make_feature_layers(n_layers)
+        self.l2 = nn.Linear(64, action_space_dims)
+        self.policy = nn.Sequential(self.l1, nn.ReLU(), *self.layers, nn.ReLU(), self.l2, nn.Softmax(dim=-1))
 
-        hidden_space1 = 512
-        hidden_space2 = 256
+    def make_feature_layers(self, n_layers: int) -> nn.Sequential:
+        layers = []
+        for i in range(n_layers):
+            layers += [nn.Linear(64, 64), nn.ReLU(inplace=True)]
+        return nn.Sequential(*layers)
 
-        # cross entropy loss for discrete action outputs.
-        # NOTE: Torch initializes Linear layers to U(-1/sqrt(n), 1/sqrt(n)) by default, biases to 0.
-        self.policy = nn.Sequential(
-                nn.Linear(obs_space_dims, hidden_space1),
-                nn.ReLU(),
-                nn.Linear(hidden_space1, hidden_space2),
-                nn.ReLU(),
-                nn.Linear(hidden_space2, action_space_dims),
-                nn.Softmax(dim=-1),
-        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Returns action probabilities"""
@@ -62,7 +59,7 @@ def episode(env, policy, optimizer):
     observation, info = env.reset()
     rewards = []
     log_probs = []
-    gamma = 0.99
+    gamma = 0.999
 
     while not finished:
         action, log_prob = policy.sample_action(torch.tensor(observation))
@@ -71,7 +68,7 @@ def episode(env, policy, optimizer):
         rewards.append(reward)
         log_probs.append(log_prob)
 
-    # log_probs = torch.tensor(log_probs, requires_grad=True)
+    log_probs = torch.tensor(log_probs, requires_grad=True)
     total_reward = sum(rewards)
 
     returns = []
@@ -82,21 +79,16 @@ def episode(env, policy, optimizer):
 
     returns = torch.tensor(returns, requires_grad=True)
     returns = (returns - returns.mean()) / (returns.std() + 1e-9)
-    # loss = torch.sum(-log_probs * returns)
-
-    policy_loss = []
-    for log_prob, G in zip(log_probs, returns):
-        policy_loss.append(-log_prob * G)  # Negative for gradient ascent
+    loss = torch.sum(-log_probs * returns)
 
     optimizer.zero_grad()
-    loss = torch.stack(policy_loss).sum()
     loss.backward()
     optimizer.step()
 
     return total_reward, loss
 
 
-policy = PolicyNetwork(obs_space_dims=8, action_space_dims=4)
+policy = PolicyNetwork(obs_space_dims=8, action_space_dims=4, n_layers=10)
 optimizer = optim.Adam(policy.parameters(), lr=1e-3)
 n_episodes = 1000
 
