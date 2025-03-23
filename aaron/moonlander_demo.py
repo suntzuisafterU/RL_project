@@ -85,10 +85,7 @@ class PolicyNetwork(nn.Module):
 
     def load_params(self, path: str):
         """Load model parameters from a file"""
-        try:
-            self.load_state_dict(torch.load(path))
-        except:
-            pass
+        self.load_state_dict(torch.load(path))
 
 
     # STOPPING HERE. TODO:
@@ -119,19 +116,23 @@ class REINFORCE(object):
         action, log_prob = self.policy.sample_action(obs)
         return action, log_prob
     
-    def episode_update(self, log_probs, rewards):
+    def episode_update(self, log_probs, rewards, terminated):
         """ Update at the end of an episode... """
         # How do we contextualize the reward at this point? We have the log_prob...
         # Want parameter update based on reward and learning rate.
         # That's the job of an optimizer like Adam.
 
-        # Rewards are returns no discounting.
+        gamma = 1.0
         final_reward = rewards[-1]
         policy_loss = []
+        # for i, (R, log_prob) in enumerate(reversed(list(zip(rewards, log_probs)))):
         for R, log_prob in zip(rewards, log_probs):
-            if abs(final_reward) == 100:
+            if terminated:
+                # R += final_reward * gamma ** i
                 R += final_reward
             policy_loss.append(-log_prob * R) # negative because grad ascent
+
+        print([x.item() for x in policy_loss[-20:]])
 
         policy_loss = torch.stack(policy_loss).sum()
         self.optim.zero_grad()
@@ -231,6 +232,7 @@ import wandb
 # Configure wandb settings
 wandb.init(
     project="lunar-lander-reinforce",
+    mode='disabled',
     config={
         "lr": lr,  # Add actual learning rate from REINFORCE
         "num_episodes": num_episodes, # TODO: Save/load this too. 
@@ -250,6 +252,12 @@ metrics = {
     'moving_avg_reward': 0
 }
 
+# Define color codes
+RED = '\033[91m'
+GREEN = '\033[92m'
+YELLOW = '\033[93m'
+BLUE = '\033[94m'
+ENDC = '\033[0m'  # Reset color
 
 
 ################################################################
@@ -257,8 +265,9 @@ metrics = {
 plt.rcParams["figure.figsize"] = (10, 5)
 
 # Initialise the environment
-# env = gym.make("LunarLander-v3", render_mode="human")
-env = gym.make("LunarLander-v3")
+render_mode = None
+# render_mode = 'human'
+env = gym.make("LunarLander-v3", render_mode=render_mode)
 
 obs, info = env.reset(seed=42)
 
@@ -285,37 +294,43 @@ for episode in range(num_episodes):
         # has terminated or truncated. Us 'terminated' to determine 
         # if bootstrapping is appropriate.
         obs, reward, terminated, truncated, info = env.step(action)
-
-        # # apply baseline to action.
-        # # Penalize being away from the center line of the state.
-        x_pos, y_pos, x_v, y_v, angle, angular_velocity, left_bool, right_bool = obs
-        # if not abs(reward) == 100:
-        #     reward -= abs(y_pos) * 0.3
-        #     reward -= abs(angular_velocity) * 5.0
-        #     # boost reward if moving down with angle and momentum low
-        #     if y_v < 0 and abs(x_v) < .1:
-        #         reward += abs(y_v) * 5
-        #         reward -= x_v * 1
-
-        rewards.append(reward)
+        landed = reward == 100
 
         # observation 8-dim: (lander x, lander y, velocity x, velocity y, 
         #                     lander angle, lander angular velocity,
         #                     right leg contact ground?, left leg contact ground?) # Last 2 bools
         # NOTE: angular velocity is in units of 0.4 rads/second. So have to multiply by 2.5 to get rads/sec...
+        x_pos, y_pos, x_v, y_v, angle, angular_velocity, left_bool, right_bool = obs
+        # # Penalize being away from the center line of the state.
+        if not terminated or truncated:
+            # # higher y_pos, more penalty. Motivate moving faster downward.
+            # reward -= abs(y_pos) * 0.3
+            # reward -= abs(x_pos) * 0.3
+            # # penalize ang vel to promote stability.
+            # reward -= abs(angular_velocity) * 5.0
+            # # boost reward if moving down with angle and momentum low
+            # if y_v < 0 and abs(x_v) < .1:
+            #     reward += abs(y_v) * 5
+            #     reward -= x_v * 1
+            rewards.append(reward)
+
 
         ## Update the policy parameters. Must be where we make use of the log_prob???
         ##                               Why log_prob??? Why not just prob???
 
         # If the episode has ended then we can reset to start a new episode
-        if terminated or truncated:
-            if abs(y_pos) > 0.1 and abs(rewards[-1]) == 100:
+        else:
+            rewards.append(reward)
+            if abs(x_pos) > 0.1 and landed:
                 # May have landed, but not between flags!! Penalize heavily.
-                rewards[-1] -= 50 * abs(y_pos)
+                print('applying landed out of flags penalty.')
+                rewards[-1] -= 50 * abs(x_pos)
 
-            policy_loss = reinforce.episode_update(log_probs, rewards)
+            policy_loss = reinforce.episode_update(log_probs, rewards, terminated)
 
-            print(episode, rewards[-2:])
+            colo = GREEN if landed else RED
+            print(episode, f'{colo} {rewards[-2:]} {ENDC} {x_pos=}')
+
             if abs(rewards[-1]) == 100:
                 episode_final_rewards.append(rewards[-2] + rewards[-1])
                 episode_final_rewards_binary.append(rewards[-1])
