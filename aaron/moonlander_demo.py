@@ -122,17 +122,18 @@ class REINFORCE(object):
         # Want parameter update based on reward and learning rate.
         # That's the job of an optimizer like Adam.
 
-        gamma = 1.0
-        final_reward = rewards[-1]
+        gamma = 0.9
         policy_loss = []
-        # for i, (R, log_prob) in enumerate(reversed(list(zip(rewards, log_probs)))):
-        for R, log_prob in zip(rewards, log_probs):
-            if terminated:
-                # R += final_reward * gamma ** i
-                R += final_reward
-            policy_loss.append(-log_prob * R) # negative because grad ascent
 
-        print([x.item() for x in policy_loss[-20:]])
+        G = 0
+        for reward in reversed(rewards):
+            G = reward + gamma * G
+            policy_loss.append(-log_prob * G) # negative because grad ascent
+        
+
+        print('losses:', [x.item() for x in policy_loss[-5:]])
+        final_reward = sum(rewards)
+        print(f'{rewards[-1:]=} {final_reward=}')
 
         policy_loss = torch.stack(policy_loss).sum()
         self.optim.zero_grad()
@@ -153,7 +154,8 @@ import signal
 import sys
 
 def clean_up():
-    policy.save_params('params_file')
+    if should_save_and_load_state:
+        policy.save_params('params_file')
     # Plot final rewards
     plt.figure()
     plt.plot(episode_final_rewards, alpha=0.5, label='Episode Rewards')
@@ -204,7 +206,13 @@ signal.signal(signal.SIGINT, signal_handler)
 
 
 # Reset the environment to generate the first observation
+should_save_and_load_state = False
+should_save_wandb = False
 num_episodes = 10000
+
+# render_mode = None; should_save_and_load_state = False
+render_mode = None; should_save_and_load_state = True
+# render_mode = 'human'; should_save_and_load_state = True
 
 lr=1e-3
 betas=(0.9, 0.999)
@@ -214,11 +222,12 @@ policy = PolicyNetwork(obs_space_dims=8, action_space_dims=4)
 reinforce = REINFORCE(policy)
 
 # Load parameters if they exist
-try:
-    policy.load_params('params_file')
-    print("Loaded existing parameters from params_file")
-except FileNotFoundError:
-    print("No existing parameters found, starting with random initialization")
+if should_save_and_load_state:
+    try:
+        policy.load_params('params_file')
+        print("Loaded existing parameters from params_file")
+    except FileNotFoundError:
+        print("No existing parameters found, starting with random initialization")
 
 
 
@@ -232,7 +241,7 @@ import wandb
 # Configure wandb settings
 wandb.init(
     project="lunar-lander-reinforce",
-    mode='disabled',
+    mode='disabled' if not should_save_wandb else None,
     config={
         "lr": lr,  # Add actual learning rate from REINFORCE
         "num_episodes": num_episodes, # TODO: Save/load this too. 
@@ -265,8 +274,6 @@ ENDC = '\033[0m'  # Reset color
 plt.rcParams["figure.figsize"] = (10, 5)
 
 # Initialise the environment
-render_mode = None
-# render_mode = 'human'
 env = gym.make("LunarLander-v3", render_mode=render_mode)
 
 obs, info = env.reset(seed=42)
@@ -278,7 +285,7 @@ episode_final_rewards_binary = []
 for episode in range(num_episodes):
     log_probs = []
     rewards = []
-    for _ in range(1000):
+    for iteration in range(1000):
         # this is where you would insert your policy
         # Action space: 0: nothing; 1: left; 2: main; 3: right;
         # action = env.action_space.sample()
@@ -294,7 +301,7 @@ for episode in range(num_episodes):
         # has terminated or truncated. Us 'terminated' to determine 
         # if bootstrapping is appropriate.
         obs, reward, terminated, truncated, info = env.step(action)
-        landed = reward == 100
+        landed = bool(reward == 100)
 
         # observation 8-dim: (lander x, lander y, velocity x, velocity y, 
         #                     lander angle, lander angular velocity,
@@ -320,11 +327,13 @@ for episode in range(num_episodes):
 
         # If the episode has ended then we can reset to start a new episode
         else:
+            print(f'{iteration=}')
             rewards.append(reward)
-            if abs(x_pos) > 0.1 and landed:
-                # May have landed, but not between flags!! Penalize heavily.
-                print('applying landed out of flags penalty.')
-                rewards[-1] -= 50 * abs(x_pos)
+
+            # if abs(x_pos) > 0.1 and landed:
+            #     # May have landed, but not between flags!! Penalize heavily.
+            #     print('applying landed out of flags penalty.')
+            #     rewards[-1] -= 50 * abs(x_pos)
 
             policy_loss = reinforce.episode_update(log_probs, rewards, terminated)
 
