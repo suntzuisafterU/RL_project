@@ -74,21 +74,15 @@ def reinforce(env, policy, optimizer, n_episodes=1000, gamma=0.99, print_every=1
         if len(returns) > 1:
             returns = (returns - returns.mean()) / (returns.std() + 1e-9)
         
-        # Calculate policy loss
-        policy_loss = []
-        for log_prob, G in zip(log_probs, returns):
-            policy_loss.append(-log_prob * G)  # Negative for gradient ascent
-        
-        # Optimize policy
+        log_probs = torch.stack(log_probs)
+
         optimizer.zero_grad()
-        policy_loss = torch.stack(policy_loss).sum()
+        policy_loss = torch.sum(-log_probs * returns)
         policy_loss.backward()
         optimizer.step()
         
         # Print progress
         print(f'Episode {episode}, Total Reward: {episode_reward:.2f}, Policy Loss: {policy_loss:.2f}')
-        avg_reward = np.mean(episode_rewards[-print_every:])
-        # print(f'Episode {episode}, Average Reward (last {print_every}): {avg_reward:.2f}')
     
     return episode_rewards
 
