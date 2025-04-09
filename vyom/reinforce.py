@@ -51,7 +51,7 @@ class PolicyNetwork(nn.Module):
         action = action.item()
         return action, log_prob
 
-    def play_episode(self):
+    def play_episode(self, discount=False):
         finished = False
         state, _ = self.env.reset()
         rewards = []
@@ -71,6 +71,8 @@ class PolicyNetwork(nn.Module):
             returns.insert(0, G)
 
         returns = torch.tensor(returns)
+        if discount:
+            returns *= (self.gamma ** torch.arange(len(returns)))
         returns = (returns - returns.mean()) / (returns.std() + 1e-9)
         log_probs = torch.stack(log_probs)
 
@@ -79,10 +81,11 @@ class PolicyNetwork(nn.Module):
 
 def main():
     env = gym.make("LunarLander-v3")
-    policy = PolicyNetwork(env, obs_space_dims=8, action_space_dims=4, n_layers=3)
-    optimizer = optim.Adam(policy.parameters(), lr=5e-3)
+    policy = PolicyNetwork(env, obs_space_dims=8, action_space_dims=4, n_layers=3, layer_size=128)
+    policy = torch.compile(policy)
+    optimizer = optim.Adam(policy.parameters(), lr=5e-4)
     n_episodes = 1000
-    batch_size = 8
+    batch_size = 1
 
     for epi in range(n_episodes):
         batch_returns, batch_rewards, batch_log_probs = [], [], []
@@ -100,7 +103,6 @@ def main():
         loss.backward()
         optimizer.step()
         
-        # if epi % 100 == 0:
         print(f"Episode {epi} \t Loss: {loss.item():.3f} \t Reward: {batch_rewards.mean().item():.2f}")
 
     env.close()
