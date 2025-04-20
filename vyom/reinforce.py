@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 import torch
+import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Categorical
@@ -21,26 +22,27 @@ plt.rcParams["figure.figsize"] = (10, 5)
 class PolicyNetwork(nn.Module):
     def __init__(self, env, obs_space_dims: int, action_space_dims: int, gamma=0.99, n_layers: int = 2, layer_size: int = 128):
         super().__init__()
-        self.obs_space_dims = obs_space_dims
-        self.action_space_dims = action_space_dims
-        self.n_layers = n_layers
-        self.layer_size = layer_size
-        self.l1 = nn.Linear(obs_space_dims, layer_size)
-        self.layers = self._make_feature_layers(n_layers)
-        self.l2 = nn.Linear(layer_size, action_space_dims)
-        self.policy = nn.Sequential(self.l1, nn.ReLU(), *self.layers, nn.ReLU(), self.l2, nn.Softmax(dim=-1))
         self.env = env
         self.gamma = gamma
+        self.n_layers = n_layers
+        self.layer_size = layer_size
 
-    def _make_feature_layers(self, n_layers: int) -> nn.Sequential:
-        layers = []
+        self.input_layer = nn.Linear(obs_space_dims, layer_size)
+        hidden = []
         for _ in range(n_layers):
-            layers += [nn.Linear(self.layer_size, self.layer_size), nn.ReLU(inplace=True)]
-        return nn.Sequential(*layers)
+            hidden += [nn.Linear(layer_size, layer_size), nn.ReLU(inplace=True)]
+        self.feats = nn.Sequential(*hidden)
+
+        self.policy_head = nn.Sequential(
+            nn.Linear(layer_size, action_space_dims),
+            nn.Softmax(dim=-1)
+        )
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Returns action probabilities"""
-        return self.policy(x)
+        x = F.relu(self.input_layer(x))
+        x = self.feats(x)
+        return self.policy_head(x)
 
     def sample_action(self, state: torch.Tensor) -> tuple[float, torch.Tensor]:
         """Sample an action from the policy"""
@@ -48,8 +50,7 @@ class PolicyNetwork(nn.Module):
         dist = Categorical(probs)
         action = dist.sample()
         log_prob = dist.log_prob(action)
-        action = action.item()
-        return action, log_prob
+        return action.item(), log_prob
 
     def play_episode(self, discount=False):
         finished = False
@@ -90,7 +91,7 @@ def main():
     for epi in range(n_episodes):
         batch_returns, batch_rewards, batch_log_probs = [], [], []
         for i in range(batch_size):
-            returns, log_probs, reward = policy.play_episode()
+            returns, log_probs, reward = policy.play_episode(discount=True)
             batch_returns.append(returns)
             batch_rewards.append(reward)
             batch_log_probs.append(log_probs)
