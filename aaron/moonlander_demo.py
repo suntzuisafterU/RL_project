@@ -198,6 +198,9 @@ def clean_up():
 def signal_handler(sig, frame):
     print('\nExiting gracefully...')
     clean_up()
+    # if render_mode != 'human':
+    #     import runpy
+    #     runpy.run_path('aaron/moonlander_demo.py render_mode=None')
     sys.exit(0)
 
 signal.signal(signal.SIGINT, signal_handler)

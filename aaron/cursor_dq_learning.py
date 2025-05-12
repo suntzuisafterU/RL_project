@@ -34,6 +34,15 @@ class QNetwork(nn.Module):
         self.load_state_dict(torch.load(path))
 
 class ReplayBuffer:
+    """
+    Sample randomly from a buffer to:
+    - Avoid catastrophic forgetting, in theory. Ex: A self driving car that learned from a quadratic loss
+      to stay in the middle of the road, after learning to stay perfectly in the middle of the road to
+      would have a zero gradient and no longer learn about the edges of the road, eventually it could
+      forget and swerve off the road (due to some other gradient signal in the reward function)
+    - Break the sequence of events up, don't learn from exactly the most recent sequence to avoid
+      a large bias in the training especially early on when the learning rate is high.
+    """
     def __init__(self, capacity):
         self.buffer = deque(maxlen=capacity)
     
@@ -51,10 +60,13 @@ class ReplayBuffer:
 class DQNAgent:
     def __init__(self, state_size, action_size, device='cpu'):
         self.state_size = state_size
+        # Does DQN require discrete actions?
         self.action_size = action_size
         self.device = device
         
-        # Q-Network and target network
+        # Q-Network (QN) and target network
+        # Target network parameters are periodically updated by COPYING the values from
+        # the QN. This stabalizes training. TODO: Is this what makes QL off-policy? What is DDQN then???
         self.qnetwork = QNetwork(state_size, action_size).to(device)
         self.target_network = QNetwork(state_size, action_size).to(device)
         self.target_network.load_state_dict(self.qnetwork.state_dict())
@@ -77,6 +89,7 @@ class DQNAgent:
             return random.randrange(self.action_size)
         
         with torch.no_grad():
+            # Why is no grad required here??
             state = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             action_values = self.qnetwork(state)
             return action_values.argmax().item()
@@ -99,7 +112,23 @@ class DQNAgent:
         
         # Get next Q values from target network
         with torch.no_grad():
-            next_q_values = self.target_network(next_states).max(1)[0]
+            # Why no grad??
+            qs = self.target_network(next_states)
+            # qs.shape == (64, 4). 64 samples, values for each of the 4 actions.
+            # We
+            q_maxs = qs.max(1)
+            # Outputs (tensor of values, indexes for those values). indexes are the action numbers
+            next_q_values = q_maxs[0]
+            # next_q_values = self.target_network(next_states).max(1)[0]
+            ## Now compare to the SARSA g-values calculation. Are they the same? Is there a bug here?
+            ## No they are different ways to do roughly the same thing with different data.
+            ## In SARSA we have the actions array that was saved into the buffer... WOW,
+            ## actually that actions array saved into the buffer shouldn't be there because that's
+            ## an old policy action right???
+            ## I'm having trouble following how the buffer works now.
+            ## OKAY: Calling it here. I am now equipped to go back and read the theory.
+            #next_actions = self.act(next_states) ## This was the start of trying to 
+            #               compute the SARSA values...
         
         # Compute target Q values
         target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
@@ -115,7 +144,9 @@ class DQNAgent:
         return loss.item()
 
     def update_target_network(self):
-        self.target_network.load_state_dict(self.qnetwork.state_dict())
+        missing_keys, unexpected_keys = self.target_network.load_state_dict(self.qnetwork.state_dict())
+        if missing_keys or unexpected_keys:
+            raise RuntimeError(f'Error when updating target network: {missing_keys=} {unexpected_keys=}')
     
     def decay_epsilon(self):
         self.epsilon = max(self.epsilon_min, self.epsilon * self.epsilon_decay)
@@ -133,6 +164,7 @@ def main():
     starting_episode = 1300
     agent.qnetwork.load_params(f'dqn_model_episode_{starting_episode}.pth')
     agent.target_network.load_state_dict(agent.qnetwork.state_dict())
+    # Set the epsilon to the value that it would have been.
     for _ in range(starting_episode):
         agent.decay_epsilon()
     
