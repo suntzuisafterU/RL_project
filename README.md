@@ -17,8 +17,10 @@ March 2025
 - vanilla policy gradient:
     - [x] REINFORCE
     - [x] DQN
-    - [ ] A2C
-    - [ ] PPO (the variant with the clipped objective)
-    - [ ] DDPG
+        - [ ] Double DQN??? (the original cursor version was double DQN)
+    - [X] A2C
+    - [ ] PPO TRPO? (the variant with the clipped objective)
+    - [ ] DDPG (Deep Deterministic Policy Gradient)
+    - [ ] GRPO
 
 
